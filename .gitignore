@@ -1,0 +1,20 @@
+# Vagrant
+.vagrant/
+
+# K3s sensitive token
+**/confs/node-token
+**/node-token
+
+# Logs
+*.log
+
+# VirtualBox / VM files
+*.vdi
+*.vbox
+*.vbox-prev
+*.iso
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
