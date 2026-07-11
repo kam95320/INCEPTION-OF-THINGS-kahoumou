@@ -92,7 +92,6 @@ TOKEN="$(cat "$TOKEN_FILE")"
 # --flannel-iface force le réseau interne des pods à utiliser la bonne interface.
 if ! command -v k3s >/dev/null 2>&1; then
 	curl -sfL https://get.k3s.io | \
-		INSTALL_K3S_VERSION="v1.33.12+k3s1" \
 		K3S_URL="https://${SERVER_IP}:6443" \
 		K3S_TOKEN="${TOKEN}" \
 		INSTALL_K3S_EXEC="agent --node-ip=${AGENT_IP} --flannel-iface=${AGENT_IFACE}" \

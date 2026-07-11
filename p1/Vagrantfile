@@ -28,10 +28,8 @@ Vagrant.configure("2") do |config|
     server.vm.provider "virtualbox" do |vb|
       vb.name = SERVER_NAME
       vb.memory = 2048
-      vb.cpus = 1
+      vb.cpus = 2
 
-      # Correction stabilité VirtualBox sur ta machine.
-      vb.customize ["modifyvm", :id, "--nestedpaging", "off"]
     end
 
     # Script d'installation K3s server.
@@ -47,10 +45,8 @@ Vagrant.configure("2") do |config|
     worker.vm.provider "virtualbox" do |vb|
       vb.name = WORKER_NAME
       vb.memory = 2048
-      vb.cpus = 1
+      vb.cpus = 2
 
-      # Correction stabilité VirtualBox sur ta machine.
-      vb.customize ["modifyvm", :id, "--nestedpaging", "off"]
     end
 
     # Script d'installation K3s agent.

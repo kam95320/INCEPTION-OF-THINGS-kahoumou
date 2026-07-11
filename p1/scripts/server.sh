@@ -71,7 +71,6 @@ echo "[SERVER] Detected interface: $SERVER_IFACE"
 # --flannel-iface force le réseau interne des pods à utiliser la bonne interface.
 if ! command -v k3s >/dev/null 2>&1; then
 	curl -sfL https://get.k3s.io | \
-		INSTALL_K3S_VERSION="v1.33.12+k3s1" \
 		INSTALL_K3S_EXEC="server --node-ip=${SERVER_IP} --advertise-address=${SERVER_IP} --tls-san=${SERVER_IP} --flannel-iface=${SERVER_IFACE}" \
 		sh -
 else
