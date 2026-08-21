@@ -1,0 +1,27 @@
+---
+- name: Prepare K3s nodes
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Python is installed
+      ansible.builtin.raw: |
+        test -x /usr/bin/python3 || (
+          apt-get update &&
+          DEBIAN_FRONTEND=noninteractive apt-get install -y python3
+        )
+      changed_when: false
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install K3s prerequisites
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+          - iptables
+        state: present

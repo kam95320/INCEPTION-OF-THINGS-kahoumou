@@ -1,55 +1,109 @@
-
 LOGIN = "kahoumou"
 
-SERVER_NAME = "#{LOGIN}S"
-WORKER_NAME = "#{LOGIN}SW"
+SERVER = "#{LOGIN}S"
+WORKER = "#{LOGIN}SW"
 
-SERVER_IP = "192.168.56.110"
-WORKER_IP = "192.168.56.111"
+LAST_NODE = WORKER
+
+NODES = {
+  SERVER => {
+    ip: "192.168.56.110",
+    memory: 2048,
+    cpus: 1
+  },
+
+  WORKER => {
+    ip: "192.168.56.111",
+    memory: 2048,
+    cpus: 1
+  }
+}
 
 Vagrant.configure("2") do |config|
-  # Base Debian stable pour K3s
-  config.vm.box = "debian/bookworm64"
 
-  # Évite que Vagrant régénère une clé SSH différente à chaque création.
-  # Cela stabilise les connexions vagrant ssh.
-  config.ssh.insert_key = false
+  # Debian 13 compatible avec le provider Libvirt.
+  config.vm.box = "josedom24/debian13"
+  config.vm.box_check_update = false
 
-  # Délais plus larges car VirtualBox peut être lent au démarrage.
-  config.vm.boot_timeout = 600
-  config.ssh.connect_timeout = 600
+  # Aucun dossier /vagrant partagé n'est nécessaire :
+  # Ansible travaille depuis la machine principale via SSH.
+  config.vm.synced_folder ".", "/vagrant", disabled: true
 
-  config.vm.define SERVER_NAME do |server|
-    server.vm.hostname = SERVER_NAME
+  # Configuration générale du provider Libvirt/KVM.
+  config.vm.provider :libvirt do |libvirt|
+    libvirt.driver = "qemu"
+    libvirt.uri = "qemu:///system"
 
-    # Réseau privé demandé pour communiquer avec le worker.
-    server.vm.network "private_network", ip: SERVER_IP
-
-    server.vm.provider "virtualbox" do |vb|
-      vb.name = SERVER_NAME
-      vb.memory = 2048
-      vb.cpus = 2
-
-    end
-
-    # Script d'installation K3s server.
-    server.vm.provision "shell", path: "scripts/server.sh"
+    # Réseau utilisé par Vagrant pour se connecter aux VMs en SSH.
+    libvirt.management_network_name = "vagrant-libvirt"
+    libvirt.management_network_address = "192.168.121.0/24"
+    libvirt.management_network_mode = "nat"
+    libvirt.management_network_autostart = true
   end
 
-  config.vm.define WORKER_NAME do |worker|
-    worker.vm.hostname = WORKER_NAME
+  NODES.each do |name, machine|
 
-    # Réseau privé demandé pour rejoindre le serveur K3s.
-    worker.vm.network "private_network", ip: WORKER_IP
+    config.vm.define name do |node|
 
-    worker.vm.provider "virtualbox" do |vb|
-      vb.name = WORKER_NAME
-      vb.memory = 2048
-      vb.cpus = 2
+      # Hostname :
+      # kahoumouS / kahoumouSW
+      node.vm.hostname = name
 
+      # Réseau privé demandé pour le projet.
+      node.vm.network "private_network",
+        ip: machine[:ip],
+        libvirt__network_name: "iot-p1",
+        libvirt__netmask: "255.255.255.0",
+        libvirt__host_ip: "192.168.56.1",
+        libvirt__forward_mode: "nat",
+        libvirt__dhcp_enabled: false
+
+      # Ressources de chaque VM.
+      node.vm.provider :libvirt do |libvirt|
+        libvirt.memory = machine[:memory]
+        libvirt.cpus = machine[:cpus]
+      end
+
+      # Préparation de chaque machine.
+      node.vm.provision "ansible" do |ansible|
+        ansible.playbook = "confs/ansible/bootstrap.yml"
+
+        # IMPORTANT :
+        # évite que Vagrant utilise l'ancien argument Ansible "--sudo".
+        ansible.compatibility_mode = "2.0"
+
+        ansible.become = true
+      end
+
+      # Une fois arrivé au worker, configuration du cluster complet.
+      if name == LAST_NODE
+        node.vm.provision "ansible" do |ansible|
+
+          ansible.playbook = "confs/ansible/cluster.yml"
+
+          # Même correction pour Ansible moderne.
+          ansible.compatibility_mode = "2.0"
+
+          ansible.limit = "all"
+
+          ansible.groups = {
+            "servers" => [SERVER],
+            "workers" => [WORKER]
+          }
+
+          ansible.host_vars = {
+            SERVER => {
+              "ip" => NODES[SERVER][:ip]
+            },
+
+            WORKER => {
+              "ip" => NODES[WORKER][:ip]
+            }
+          }
+
+          ansible.become = true
+        end
+      end
     end
-
-    # Script d'installation K3s agent.
-    worker.vm.provision "shell", path: "scripts/agent.sh"
   end
 end
