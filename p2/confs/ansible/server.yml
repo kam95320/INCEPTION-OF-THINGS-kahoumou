@@ -1,0 +1,106 @@
+---
+- name: Install K3s server and applications
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Detect private network interface
+      ansible.builtin.shell: |
+        ip -o -4 addr show |
+        awk '$4 ~ /^{{ server_ip | regex_escape }}\/[0-9]+$/ {print $2; exit}'
+      register: private_iface
+      changed_when: false
+
+    - name: Fail if private interface was not found
+      ansible.builtin.fail:
+        msg: "No interface found with IP {{ server_ip }}"
+      when: private_iface.stdout | length == 0
+
+    - name: Install K3s server
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_EXEC="server \
+        --node-ip={{ server_ip }} \
+        --advertise-address={{ server_ip }} \
+        --tls-san={{ server_ip }} \
+        --flannel-iface={{ private_iface.stdout }}" \
+        sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for K3s server
+      ansible.builtin.command:
+        cmd: systemctl is-active k3s
+      register: k3s_status
+      retries: 30
+      delay: 2
+      until: k3s_status.stdout == "active"
+      changed_when: false
+
+    - name: Create kubeconfig directory
+      ansible.builtin.file:
+        path: /home/vagrant/.kube
+        state: directory
+        owner: vagrant
+        group: vagrant
+        mode: "0755"
+
+    - name: Copy kubeconfig
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /home/vagrant/.kube/config
+        remote_src: true
+        owner: vagrant
+        group: vagrant
+        mode: "0600"
+
+    - name: Create Kubernetes manifests directory
+      ansible.builtin.file:
+        path: /opt/iot/manifests
+        state: directory
+        mode: "0755"
+
+    - name: Copy Kubernetes manifests
+      ansible.builtin.copy:
+        src: "../{{ item }}"
+        dest: "/opt/iot/manifests/{{ item }}"
+        mode: "0644"
+      loop:
+        - app1.yaml
+        - app2.yaml
+        - app3.yaml
+        - ingress.yaml
+
+    - name: Apply Kubernetes manifests
+      ansible.builtin.command:
+        cmd: k3s kubectl apply -f /opt/iot/manifests
+      register: kubectl_apply
+      changed_when: >
+        'created' in kubectl_apply.stdout or
+        'configured' in kubectl_apply.stdout
+
+    - name: Wait for app1
+      ansible.builtin.command:
+        cmd: k3s kubectl rollout status deployment/app1 --timeout=180s
+      changed_when: false
+
+    - name: Wait for app2
+      ansible.builtin.command:
+        cmd: k3s kubectl rollout status deployment/app2 --timeout=180s
+      changed_when: false
+
+    - name: Wait for app3
+      ansible.builtin.command:
+        cmd: k3s kubectl rollout status deployment/app3 --timeout=180s
+      changed_when: false
+
+    - name: Display Kubernetes resources
+      ansible.builtin.command:
+        cmd: k3s kubectl get pods,svc,ingress -o wide
+      register: kubernetes_state
+      changed_when: false
+
+    - name: Show Kubernetes resources
+      ansible.builtin.debug:
+        var: kubernetes_state.stdout_lines
