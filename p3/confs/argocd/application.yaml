@@ -7,8 +7,8 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/kam95320/INCEPTION-OF-THINGS.git
-    targetRevision: HEAD
+    repoURL: https://github.com/kam95320/INCEPTION-OF-THINGS-kahoumou.git
+    targetRevision: main
     path: p3/confs/app
 
   destination:
