@@ -42,6 +42,36 @@ kubectl wait \
 echo "[P3] Creating Argo CD Application..."
 kubectl apply -f "${P3_DIR}/confs/argocd/application.yaml"
 
+echo "[P3] Waiting for Argo CD synchronization..."
+
+for i in {1..60}; do
+  SYNC_STATUS="$(kubectl get application playground \
+    -n argocd \
+    -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+
+  HEALTH_STATUS="$(kubectl get application playground \
+    -n argocd \
+    -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+
+  if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+    echo "[P3] Argo CD application is Synced and Healthy."
+    break
+  fi
+
+  sleep 5
+done
+
+if [ "$SYNC_STATUS" != "Synced" ] || [ "$HEALTH_STATUS" != "Healthy" ]; then
+  echo "[ERROR] Argo CD application did not become Synced and Healthy."
+  kubectl get application playground -n argocd
+  exit 1
+fi
+
+echo "[P3] Waiting for playground deployment..."
+kubectl rollout status deployment/playground \
+  -n dev \
+  --timeout=180s
+
 echo "[P3] Cluster status:"
 kubectl get nodes
 kubectl get ns
