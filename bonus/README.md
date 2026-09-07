@@ -126,6 +126,24 @@ nginx['listen_port'] = 80                 # ce qu'écoute le conteneur
 
 Traefik fait la correspondance entre les deux.
 
+### Pourquoi Argo CD est-il reconfiguré à 30 secondes ?
+
+Par défaut, Argo CD empile deux caches de 3 minutes : le cache de révision du
+`repo-server`, puis l'intervalle de réconciliation du contrôleur. Un commit
+peut donc mettre **jusqu'à 6 minutes** à être vu — mesuré à 5 min 50 s lors des
+essais, ce qui est intenable pendant une soutenance.
+
+`create_cluster.sh` ramène les deux à 30 secondes :
+
+```
+argocd-cmd-params-cm : reposerver.revision.cache.expiration = 30s
+argocd-cm            : timeout.reconciliation                = 30s
+```
+
+Sur un dépôt local, le coût est négligeable. Après ce réglage, la bascule
+v1 → v2 est déployée en **une dizaine de secondes**, sans aucune action
+manuelle dans l'interface Argo CD.
+
 ### Pourquoi deux ports publiés par K3d ?
 
 Les deux pointent vers le port 80 du load balancer :
@@ -137,6 +155,17 @@ Les deux pointent vers le port 80 du load balancer :
   de la Partie 3.
 
 `create_cluster.sh` ajoute `gitlab.local` et `argocd.local` dans `/etc/hosts`.
+
+### Deux détails de configuration GitLab
+
+`gitlab_rails['monitoring_whitelist']` autorise les réseaux du cluster.
+GitLab restreint ses endpoints de supervision (`/-/health`) à `127.0.0.1` et
+répond **404** à tout le reste : sans cette liste, la sonde du kubelet — qui
+arrive depuis `10.42.0.1` en K3d — échouerait indéfiniment et le pod ne
+passerait jamais `Ready`.
+
+Le clone SSH est publié sur le port 32022 : le port 22 du nœud n'est pas
+disponible dans le conteneur K3d.
 
 ### Pourquoi GitLab est-il allégé ?
 
@@ -154,6 +183,19 @@ est commentée dans le fichier.
 | `confs/argocd-repo-secret.yaml`| identifiants du dépôt GitLab pour Argo CD (mot de passe injecté à l'exécution) |
 | `confs/argocd-ingress.yaml`    | accès navigateur à Argo CD |
 | `confs/app/`                   | manifestes de l'application, poussés dans le dépôt GitLab |
+
+## Vérifié en conditions réelles
+
+L'ensemble a été déroulé de bout en bout sur un cluster K3d :
+
+| Étape | Résultat |
+|---|---|
+| GitLab | `gitlab-ce 19.3.1`, pod `1/1 Running` |
+| Interface GitLab via Traefik | `HTTP 200`, redirection vers `http://gitlab.local:8080/users/sign_in` |
+| Dépôt créé et poussé | `root/iot-kahoumou`, branche `main` |
+| Argo CD → dépôt GitLab local | `Synced` / `Healthy` |
+| `curl http://localhost:8888/` | `{"status":"ok", "message": "v1"}` |
+| `switch_version.sh v2` | déployé en **10 s**, `{"status":"ok", "message": "v2"}` |
 
 ## Remise à zéro
 

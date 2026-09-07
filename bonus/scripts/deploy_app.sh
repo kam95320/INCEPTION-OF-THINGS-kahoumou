@@ -52,5 +52,4 @@ kubectl get applications -n "${ARGOCD_NS}"
 kubectl get pods -n "${DEV_NS}"
 echo
 log "Test de l'application :"
-curl -s "http://localhost:${APP_PORT}/" || warn "L'application ne repond pas encore."
-echo
+app_response || warn "L'application ne repond pas encore."

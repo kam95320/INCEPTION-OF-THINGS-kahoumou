@@ -30,6 +30,12 @@ data:
     # Clone SSH expose en NodePort (le port 22 du noeud n'est pas disponible).
     gitlab_rails['gitlab_shell_ssh_port'] = 32022
 
+    # GitLab restreint ses endpoints de supervision (/-/health, /-/readiness)
+    # a 127.0.0.1 et renvoie 404 a tout le reste. La sonde du kubelet arrive
+    # depuis le reseau du cluster (10.42.0.1 en K3d) : sans cette liste, le pod
+    # ne serait jamais declare Ready.
+    gitlab_rails['monitoring_whitelist'] = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12']
+
     # --- Allegements pour tenir dans un cluster local ---
     # Puma en mode mono-processus et Sidekiq peu concurrent : c'est le
     # reglage recommande par GitLab pour les petites installations.

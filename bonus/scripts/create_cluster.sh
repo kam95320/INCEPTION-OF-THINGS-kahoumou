@@ -53,14 +53,28 @@ kubectl wait --for=condition=Established --timeout=120s crd/applications.argopro
 log "Attente des deploiements Argo CD (1 a 2 minutes)..."
 kubectl wait --for=condition=Available --timeout=600s deployment --all -n "${ARGOCD_NS}"
 
-# Argo CD sert du HTTPS avec un certificat auto-signe par defaut.
-# En mode "insecure", il sert du HTTP simple : l'Ingress Traefik peut alors
-# lui parler sans avoir a gerer un certificat local.
-log "Passage de l'API Argo CD en HTTP (cluster local)..."
-kubectl -n "${ARGOCD_NS}" patch configmap argocd-cmd-params-cm \
-  --type merge -p '{"data":{"server.insecure":"true"}}' >/dev/null
-kubectl -n "${ARGOCD_NS}" rollout restart deployment argocd-server >/dev/null
+# Deux reglages d'Argo CD, appliques ensemble :
+#
+# 1. server.insecure : Argo CD sert du HTTPS avec un certificat auto-signe par
+#    defaut. En HTTP simple, l'Ingress Traefik peut lui parler sans avoir a
+#    gerer de certificat local.
+#
+# 2. Detection des commits. Par defaut Argo CD empile deux caches de 3 minutes
+#    (cache de revision du repo-server, puis intervalle de reconciliation), ce
+#    qui fait attendre jusqu'a 6 minutes avant qu'un commit soit vu. Les deux
+#    sont ramenes a 30 secondes : sur un depot local, le cout est negligeable
+#    et la synchronisation devient visible en moins d'une minute.
+log "Configuration d'Argo CD (HTTP local, detection rapide des commits)..."
+kubectl -n "${ARGOCD_NS}" patch configmap argocd-cmd-params-cm --type merge -p \
+  '{"data":{"server.insecure":"true","reposerver.revision.cache.expiration":"30s"}}' >/dev/null
+kubectl -n "${ARGOCD_NS}" patch configmap argocd-cm --type merge -p \
+  '{"data":{"timeout.reconciliation":"30s"}}' >/dev/null
+
+kubectl -n "${ARGOCD_NS}" rollout restart deployment argocd-server argocd-repo-server >/dev/null
+kubectl -n "${ARGOCD_NS}" rollout restart statefulset argocd-application-controller >/dev/null
 kubectl -n "${ARGOCD_NS}" rollout status deployment argocd-server --timeout=180s
+kubectl -n "${ARGOCD_NS}" rollout status deployment argocd-repo-server --timeout=180s
+kubectl -n "${ARGOCD_NS}" rollout status statefulset argocd-application-controller --timeout=180s
 
 log "Publication de l'interface Argo CD sur http://${ARGOCD_HOST}:${HTTP_PORT}"
 kubectl apply -f "${CONFS_DIR}/argocd-ingress.yaml" >/dev/null

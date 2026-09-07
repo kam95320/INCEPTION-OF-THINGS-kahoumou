@@ -34,5 +34,4 @@ echo "Version deployee :"
 kubectl get deployment playground -n "${DEV_NS}" \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}' 2>/dev/null || true
 echo "Reponse HTTP :"
-curl -s "http://localhost:${APP_PORT}/" || true
-echo
+app_response || true

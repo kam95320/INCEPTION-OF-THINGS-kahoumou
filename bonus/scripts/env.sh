@@ -76,22 +76,25 @@ argocd_admin_password() {
 # /etc/hosts). Si le nom n'est pas resolvable — par exemple quand /etc/hosts
 # n'a pas pu etre modifie — on bascule automatiquement sur un port-forward.
 
-GITLAB_FORWARD_PID=""
+# Le PID est conserve dans un fichier et non dans une variable : les fonctions
+# ci-dessous sont appelees depuis des substitutions de commande, donc dans des
+# sous-shells dont les variables ne remontent pas au script appelant.
+FORWARD_PID_FILE="${STATE_DIR}/port-forward.pid"
 
 stop_gitlab_forward() {
-  if [ -n "${GITLAB_FORWARD_PID}" ]; then
-    kill "${GITLAB_FORWARD_PID}" 2>/dev/null || true
-    wait "${GITLAB_FORWARD_PID}" 2>/dev/null || true
-    GITLAB_FORWARD_PID=""
-  fi
+  [ -f "${FORWARD_PID_FILE}" ] || return 0
+  kill "$(cat "${FORWARD_PID_FILE}")" 2>/dev/null || true
+  rm -f "${FORWARD_PID_FILE}"
 }
 
 start_gitlab_forward() {
+  # Coupe d'abord un eventuel port-forward laisse par une execution precedente.
   stop_gitlab_forward
+  mkdir -p "${STATE_DIR}"
   kubectl port-forward -n "${GITLAB_NS}" \
     "svc/gitlab" "${FORWARD_PORT}:${HTTP_PORT}" >/dev/null 2>&1 &
-  GITLAB_FORWARD_PID=$!
-  sleep 2
+  echo $! > "${FORWARD_PID_FILE}"
+  sleep 3
 }
 
 # Renvoie l'URL de base a utiliser pour parler a GitLab depuis la machine,
@@ -116,6 +119,22 @@ wait_gitlab_http() {
     sleep 5
   done
   die "GitLab ne repond pas sur ${base}"
+}
+
+# Interroge l'application. Juste apres un remplacement de pod, Traefik met
+# une a deux secondes a basculer ses endpoints : une requete unique pourrait
+# tomber sur "Bad Gateway" alors que le deploiement est correct.
+app_response() {
+  local i out=""
+  for i in $(seq 1 15); do
+    out="$(curl -s --max-time 5 "http://localhost:${APP_PORT}/" 2>/dev/null || true)"
+    case "${out}" in
+      *'"status"'*) printf '%s\n' "${out}"; return 0 ;;
+    esac
+    sleep 2
+  done
+  printf '%s\n' "${out:-aucune reponse}"
+  return 1
 }
 
 # Nom du pod GitLab (StatefulSet a une seule replique).

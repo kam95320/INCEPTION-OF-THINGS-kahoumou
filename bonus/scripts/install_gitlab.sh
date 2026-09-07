@@ -19,7 +19,9 @@ if kubectl get secret gitlab-root-password -n "${GITLAB_NS}" >/dev/null 2>&1; th
   log "Mot de passe root deja present."
 else
   log "Generation du mot de passe root..."
-  ROOT_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
+  # head lit une quantite bornee puis rend la main : aucun SIGPIPE ne remonte
+  # dans le pipeline, ce qui compte avec `set -o pipefail`.
+  ROOT_PASSWORD="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-24)"
   kubectl create secret generic gitlab-root-password \
     -n "${GITLAB_NS}" \
     --from-literal=password="${ROOT_PASSWORD}" >/dev/null

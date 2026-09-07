@@ -52,9 +52,12 @@ if [ "${2:-}" = "--now" ]; then
     argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 fi
 
+# Argo CD est configure pour interroger le depot toutes les 30 secondes
+# (voir create_cluster.sh), la bascule est donc visible en moins d'une minute.
+# La fenetre reste large pour absorber le temps de telechargement de l'image.
 log "Attente de la synchronisation automatique par Argo CD..."
 TARGET="wil42/playground:${VERSION}"
-for i in $(seq 1 60); do
+for i in $(seq 1 72); do
   CURRENT="$(kubectl get deployment playground -n "${DEV_NS}" \
     -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
   if [ "${CURRENT}" = "${TARGET}" ]; then
@@ -71,5 +74,4 @@ kubectl get application playground -n "${ARGOCD_NS}"
 kubectl get pods -n "${DEV_NS}"
 echo
 log "Reponse de l'application :"
-curl -s "http://localhost:${APP_PORT}/"
-echo
+app_response
