@@ -1,0 +1,29 @@
+# Application Argo CD du bonus.
+#
+# Difference essentielle avec la Partie 3 : le depot source n'est plus GitHub
+# mais le GitLab local. Argo CD joint GitLab par son Service Kubernetes interne
+# (service "gitlab" du namespace "gitlab"), sans sortir du cluster ni dependre
+# du DNS de la machine. Le Service ecoute sur 8080, le meme port que l'URL
+# publique http://gitlab.local:8080 : l'adresse du depot est donc la meme vue
+# de l'interieur et de l'exterieur, au nom d'hote pres.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: playground
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: http://gitlab.gitlab.svc.cluster.local:8080/root/iot-kahoumou.git
+    targetRevision: main
+    path: app
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

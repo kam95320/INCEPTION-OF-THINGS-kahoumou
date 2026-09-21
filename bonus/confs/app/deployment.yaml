@@ -1,0 +1,26 @@
+# Application de la Partie 3, deployee ici par Argo CD depuis le GitLab local.
+# C'est ce fichier qui est modifie pour passer de la v1 a la v2.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playground
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: playground
+  template:
+    metadata:
+      labels:
+        app: playground
+    spec:
+      containers:
+        - name: playground
+          image: wil42/playground:v1
+          ports:
+            - containerPort: 8888
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi

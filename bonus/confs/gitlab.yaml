@@ -1,0 +1,182 @@
+# =============================================================================
+# GitLab CE, image omnibus officielle (https://docs.gitlab.com/install/docker/).
+#
+# L'image `gitlab/gitlab-ce:latest` est la distribution officielle tout-en-un :
+# elle embarque PostgreSQL, Redis, Gitaly, Puma, Sidekiq et Nginx dans un seul
+# conteneur. C'est la seule facon simple d'obtenir la DERNIERE version de
+# GitLab dans le cluster : depuis la version 10 du chart Helm (GitLab 19), le
+# chart ne fournit plus PostgreSQL, Redis ni MinIO et exige des services
+# externes.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-config
+  namespace: gitlab
+data:
+  # Configuration omnibus, lue par le conteneur au demarrage.
+  GITLAB_OMNIBUS_CONFIG: |
+    # URL publique de l'instance. Elle inclut le port 8080 car c'est celui
+    # publie par K3d sur la machine ; GitLab genere donc des liens corrects.
+    external_url 'http://gitlab.local:8080'
+
+    # Nginx ecoute quand meme sur 80 dans le conteneur : c'est Traefik qui
+    # fait la correspondance. Sans cela, GitLab ecouterait sur 8080.
+    nginx['listen_port'] = 80
+    nginx['listen_https'] = false
+    letsencrypt['enable'] = false
+
+    # Clone SSH expose en NodePort (le port 22 du noeud n'est pas disponible).
+    gitlab_rails['gitlab_shell_ssh_port'] = 32022
+
+    # GitLab restreint ses endpoints de supervision (/-/health, /-/readiness)
+    # a 127.0.0.1 et renvoie 404 a tout le reste. La sonde du kubelet arrive
+    # depuis le reseau du cluster (10.42.0.1 en K3d) : sans cette liste, le pod
+    # ne serait jamais declare Ready.
+    gitlab_rails['monitoring_whitelist'] = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12']
+
+    # --- Allegements pour tenir dans un cluster local ---
+    # Puma en mode mono-processus et Sidekiq peu concurrent : c'est le
+    # reglage recommande par GitLab pour les petites installations.
+    puma['worker_processes'] = 0
+    sidekiq['max_concurrency'] = 5
+
+    postgresql['shared_buffers'] = '128MB'
+    postgresql['max_connections'] = 100
+
+    # Composants inutiles au sujet : supervision, registre d'images, agent
+    # Kubernetes (c'est Argo CD qui deploie), pages, mattermost.
+    prometheus_monitoring['enable'] = false
+    registry['enable'] = false
+    gitlab_kas['enable'] = false
+    gitlab_pages['enable'] = false
+    mattermost['enable'] = false
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  type: ClusterIP
+  selector:
+    app: gitlab
+  ports:
+    # Le service ecoute sur 8080 pour que l'URL interne utilisee par Argo CD
+    # soit identique a l'URL publique (meme hote logique, meme port).
+    - name: http
+      port: 8080
+      targetPort: 80
+    - name: ssh
+      port: 22
+      targetPort: 22
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  serviceName: gitlab
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab
+  template:
+    metadata:
+      labels:
+        app: gitlab
+    spec:
+      # GitLab est lent a s'arreter proprement (base + Redis a fermer).
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: gitlab
+          image: gitlab/gitlab-ce:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+            - name: ssh
+              containerPort: 22
+          envFrom:
+            - configMapRef:
+                name: gitlab-config
+          env:
+            # Mot de passe du compte root, cree par le script d'installation.
+            - name: GITLAB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gitlab-root-password
+                  key: password
+          volumeMounts:
+            - name: config
+              mountPath: /etc/gitlab
+            - name: data
+              mountPath: /var/opt/gitlab
+            - name: logs
+              mountPath: /var/log/gitlab
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2500Mi
+            limits:
+              memory: 6Gi
+          # Le premier demarrage (migrations de la base) prend 5 a 10 minutes :
+          # startupProbe laisse jusqu'a 20 minutes avant de declarer un echec.
+          startupProbe:
+            httpGet:
+              path: /-/health
+              port: 80
+            periodSeconds: 15
+            failureThreshold: 80
+          readinessProbe:
+            httpGet:
+              path: /-/health
+              port: 80
+            periodSeconds: 15
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata:
+        name: config
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+    - metadata:
+        name: logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+
+---
+# Acces navigateur : http://gitlab.local:8080
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  rules:
+    - host: gitlab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gitlab
+                port:
+                  number: 8080
